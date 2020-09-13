@@ -68,6 +68,11 @@ impl Face {
         }
     }
 
+    fn rotated_face(&self, rot: &Matrix) -> Option<Self> {
+        let rotated = rot * &self.direction();
+        Self::from_direction(&rotated)
+    }
+
     fn from_direction(v: &Vector) -> Option<Self> {
         match v.as_ref() {
             [0, -1, 0] => Some(Face::Front),
@@ -255,23 +260,27 @@ impl Cube {
         let mut cf = CubeFace::white();
 
         let dir = f.direction();
-        let rot = f.rotation_matrix(Direction::CW);
+        let rdir = &self.rotation * &dir;
+        let rot = &(&self.rotation * &f.rotation_matrix(Direction::CW))
+            * &self.rotation.inverse().expect("det wasn't 1");
 
         let mut corner = f.corner_orth();
         corner.add_vec(&dir);
+        corner = &self.rotation * &corner;
         for c in &[(0, 0), (2, 0), (2, 2), (0, 2)] {
-            cf.set(*c, self[&corner].color(&dir).unwrap());
+            cf.set(*c, self[&corner].color(&rdir).unwrap());
             corner = &rot * &corner;
         }
 
         let mut edge = f.edge_orth();
         edge.add_vec(&dir);
+        edge = &self.rotation * &edge;
         for c in &[(1, 0), (2, 1), (1, 2), (0, 1)] {
-            cf.set(*c, self[&edge].color(&dir).unwrap());
+            cf.set(*c, self[&edge].color(&rdir).unwrap());
             edge = &rot * &edge;
         }
 
-        cf.set((1, 1), self[&dir].color(&dir).unwrap());
+        cf.set((1, 1), self[&rdir].color(&rdir).unwrap());
 
         cf
     }
@@ -320,7 +329,8 @@ impl Cube {
     }
 
     pub fn rotate(&mut self, face: Face, dir: Direction) {
-        unimplemented!();
+        let rot = face.rotated_face(&self.rotation).unwrap().rotation_matrix(!dir);
+        self.rotation = &rot * &self.rotation;
     }
 
     fn swap(&mut self, v1: &Vector, v2: &Vector) {
@@ -331,17 +341,24 @@ impl Cube {
 
     pub fn turn(&mut self, face: Face, dir: Direction) {
         let base = face.direction();
-        let rot = face.rotation_matrix(dir);
-        let rotn = face.rotation_matrix(!dir);
+        let rot = &(&self.rotation * &face.rotation_matrix(dir))
+            * &self.rotation.inverse().expect("det wasn't 1");
+        let rotn_org = face.rotation_matrix(!dir);
+        let rotn = &(&self.rotation * &rotn_org)
+            * &self.rotation.inverse().expect("det wasn't 1");
 
         let mut corner1 = face.corner_orth();
-        let mut corner2 = &rotn * &corner1;
+        let mut corner2 = &rotn_org * &corner1;
         let mut edge1 = face.edge_orth();
-        let mut edge2 = &rotn * &edge1;
+        let mut edge2 = &rotn_org * &edge1;
         corner1.add_vec(&base);
         corner2.add_vec(&base);
         edge1.add_vec(&base);
         edge2.add_vec(&base);
+        corner1 = &self.rotation * &corner1;
+        corner2 = &self.rotation * &corner2;
+        edge1 = &self.rotation * &edge1;
+        edge2 = &self.rotation * &edge2;
 
         self[&corner1].rotate(&rot);
         self[&edge1].rotate(&rot);
@@ -371,6 +388,11 @@ impl Cube {
                 return Err(());
             }
 
+            let rotation = match chars[0] {
+                'X' | 'Y' | 'Z' => true,
+                _ => false,
+            };
+
             let face = match chars[0] {
                 'R' => Face::Right,
                 'L' => Face::Left,
@@ -378,6 +400,9 @@ impl Cube {
                 'D' => Face::Down,
                 'B' => Face::Back,
                 'F' => Face::Front,
+                'X' => Face::Right,
+                'Y' => Face::Up,
+                'Z' => Face::Front,
                 _ => return Err(()),
             };
 
@@ -388,10 +413,19 @@ impl Cube {
                 Direction::CW
             };
 
-            if chars.len() == 2 && chars[1] == '2' {
-                self.turn(face, dir);
+            let time = if chars.len() == 2 && chars[1] == '2' {
+                2
+            } else {
+                1
+            };
+
+            for _ in 0..time {
+                if rotation {
+                    self.rotate(face, dir);
+                } else {
+                    self.turn(face, dir);
+                }
             }
-            self.turn(face, dir);
         }
         Ok(())
     }

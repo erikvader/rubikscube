@@ -149,6 +149,10 @@ impl Matrix {
         Self([1, 0, 0, 0, 1, 0, 0, 0, 1])
     }
 
+    pub fn raw(x: [i32; 9]) -> Self {
+        Self(x)
+    }
+
     pub fn rotation_x(cw: bool) -> Self {
         let s = if cw {-1} else {1};
         Self([
@@ -196,6 +200,35 @@ impl Matrix {
             }
         }
         res
+    }
+
+    pub fn mul_scalar(&mut self, s: i32) {
+        for i in 0..9 {
+            self.0[i] *= s;
+        }
+    }
+
+    pub fn determinant(&self) -> i32 {
+        let [a11, a12, a13, a21, a22, a23, a31, a32, a33] = self.0;
+        a11*a22*a33 + a12*a23*a31 + a13*a21*a32 - a31*a22*a13 - a32*a23*a11 - a33*a21*a12
+    }
+
+    // NOTE: only works when |self.determinant()| = 1
+    pub fn inverse(&self) -> Option<Matrix> {
+        let det = self.determinant();
+        if det != 1 && det != -1 {
+            return None
+        }
+
+        let [a, b, c, d, e, f, g, h, i] = self.0;
+        let res = [
+             e*i - f*h, -b*i + c*h,  b*f - c*e,
+            -d*i + f*g,  a*i - c*g, -a*f + c*d,
+             d*h - e*g, -a*h + b*g,  a*e - b*d
+        ];
+        let mut m = Self::raw(res);
+        m.mul_scalar(det);
+        Some(m)
     }
 }
 
