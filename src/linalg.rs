@@ -1,54 +1,12 @@
 use std::ops;
 use std::fmt;
+use std::mem::{self, MaybeUninit};
 
 #[derive(Debug,Clone,PartialEq,Eq)]
 pub struct Vector([i32; 3]);
 
 #[derive(Debug,Clone,PartialEq,Eq)]
 pub struct Matrix([i32; 9]);
-
-pub struct PartialVector(Vector);
-
-impl PartialVector {
-    fn new(init: &Vector) -> Self {
-        Self(init.clone())
-    }
-
-    pub fn calc(self) -> Vector {
-        self.0
-    }
-
-    pub fn add(mut self, other: &Vector) -> Self {
-        for i in 1..=3 {
-            self.0.0[i] += other.0[i];
-        }
-        self
-    }
-
-    pub fn mul_vec(mut self, other: &Vector) -> Self {
-        for i in 0..3 {
-            self.0.0[i] *= other.0[i];
-        }
-        self
-    }
-
-    pub fn mul(mut self, scalar: i32) -> Self {
-        for i in 0..3 {
-            self.0.0[i] *= scalar;
-        }
-        self
-    }
-
-    pub fn mul_mat(self, matrix: &Matrix) -> Self {
-        let mut res = Vector::zeros();
-        for r in 1..=3 {
-            for c in 1..=3 {
-                res.0[r-1] += matrix[(r, c)] * self.0.0[c-1];
-            }
-        }
-        Self(res)
-    }
-}
 
 impl Vector {
     pub fn new(x: i32, y: i32, z: i32) -> Self {
@@ -74,31 +32,65 @@ impl Vector {
         self.0[2]
     }
 
-    pub fn math(&self) -> PartialVector {
-        PartialVector::new(self)
+    pub fn add_vec(&mut self, other: &Vector) -> &mut Self {
+        for i in 0..3 {
+            self.0[i] += other.0[i];
+        }
+        self
     }
 
-    pub fn add(&self, other: &Vector) -> PartialVector {
-        self.math().add(other)
+    pub fn mul_vec(&mut self, other: &Vector) -> &mut Self {
+        for i in 0..3 {
+            self.0[i] *= other.0[i];
+        }
+        self
     }
 
-    pub fn mul_vec(&self, other: &Vector) -> PartialVector {
-        self.math().mul_vec(other)
+    pub fn mul_scal(&mut self, scalar: i32) -> &mut Self {
+        for i in 0..3 {
+            self.0[i] *= scalar;
+        }
+        self
     }
 
-    pub fn mul(&self, scalar: i32) -> PartialVector {
-        self.math().mul(scalar)
+    pub fn components(&self) -> [Vector; 3] {
+        [
+            Vector::new(self[1], 0, 0),
+            Vector::new(0, self[2], 0),
+            Vector::new(0, 0, self[3])
+        ]
     }
 
-    pub fn mul_mat(&self, matrix: &Matrix) -> PartialVector {
-        self.math().mul_mat(matrix)
+    pub fn components2(&self) -> [Vector; 2] {
+        let mut i = 0;
+        let mut res: [MaybeUninit<Vector>; 2] = unsafe{MaybeUninit::uninit().assume_init()};
+
+        for j in 1..=3 {
+            if self[j] != 0 {
+                if i >= 2 {
+                    panic!("too many non-zero components");
+                }
+                let mut v = Vector::zeros();
+                v[j] = self[j];
+                res[i] = MaybeUninit::new(v);
+                i += 1;
+            }
+        }
+
+        if i < 2 {
+            panic!("too few non-zero components");
+        }
+
+        unsafe{mem::transmute::<_, [Vector; 2]>(res)}
     }
 }
 
 impl ops::Add for &Vector {
     type Output = Vector;
     fn add(self, other: Self) -> Self::Output {
-        self.add(other).calc()
+        let mut r = self.clone();
+        r.add_vec(other);
+        r
     }
 }
 
@@ -117,6 +109,37 @@ impl fmt::Display for Vector {
     }
 }
 
+impl ops::Index<usize> for Vector {
+    type Output = i32;
+    fn index(&self, rc: usize) -> &Self::Output {
+        &self.0[rc-1]
+    }
+}
+
+impl ops::IndexMut<usize> for Vector {
+    fn index_mut(&mut self, rc: usize) -> &mut Self::Output {
+        &mut self.0[rc-1]
+    }
+}
+
+impl From<&[i32; 3]> for Vector {
+    fn from(a: &[i32; 3]) -> Self {
+        Vector::new(a[0], a[1], a[2])
+    }
+}
+
+impl std::cmp::PartialEq<[i32; 3]> for Vector {
+    fn eq(&self, other: &[i32; 3]) -> bool {
+        &self.0 == other
+    }
+}
+
+impl std::convert::AsRef<[i32; 3]> for Vector {
+    fn as_ref(&self) -> &[i32; 3] {
+        &self.0
+    }
+}
+
 impl Matrix {
     pub fn zeros() -> Self {
         Self([0; 9])
@@ -124,6 +147,55 @@ impl Matrix {
 
     pub fn diag() -> Self {
         Self([1, 0, 0, 0, 1, 0, 0, 0, 1])
+    }
+
+    pub fn rotation_x(cw: bool) -> Self {
+        let s = if cw {-1} else {1};
+        Self([
+            1, 0, 0,
+            0, 0, -s,
+            0, s, 0
+        ])
+    }
+
+    pub fn rotation_y(cw: bool) -> Self {
+        let s = if cw {-1} else {1};
+        Self([
+            0, 0, s,
+            0, 1, 0,
+            -s, 0, 0
+        ])
+    }
+
+    pub fn rotation_z(cw: bool) -> Self {
+        let s = if cw {-1} else {1};
+        Self([
+            0, -s, 0,
+            s, 0, 0,
+            0, 0, 1
+        ])
+    }
+
+    pub fn mul_mat(&self, other: &Self) -> Matrix {
+        let mut res = Self::zeros();
+        for i in 1..=3 {
+            for j in 1..=3 {
+                for k in 1..=3 {
+                    res[(i, j)] += self[(i, k)] * other[(k, j)];
+                }
+            }
+        }
+        res
+    }
+
+    pub fn mul_vec(&self, vec: &Vector) -> Vector {
+        let mut res = Vector::zeros();
+        for r in 1..=3 {
+            for c in 1..=3 {
+                res[r] += self[(r, c)] * vec[c];
+            }
+        }
+        res
     }
 }
 
@@ -155,6 +227,13 @@ impl fmt::Display for Matrix {
 impl ops::Mul<&Vector> for &Matrix {
     type Output = Vector;
     fn mul(self, other: &Vector) -> Self::Output {
-        other.mul_mat(&self).calc()
+        self.mul_vec(other)
+    }
+}
+
+impl ops::Mul for &Matrix {
+    type Output = Matrix;
+    fn mul(self, other: &Matrix) -> Self::Output {
+        self.mul_mat(other)
     }
 }
